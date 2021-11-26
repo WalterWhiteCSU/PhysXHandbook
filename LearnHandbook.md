@@ -1239,4 +1239,234 @@ hfShape->setGeometry(PxHeightFieldGeometry(pHeightField, ...));
 
 
 
+
+
+
+
 ## Rigid Body Overview
+
+### Introduction
+
+----
+
+本章将介绍使用 `NVIDIA PhysX ` 引擎模拟刚体动力学的基础知识。
+
+### Rigid Body Object Model
+
+-------------
+
+`PhysX` 使用分层刚体对象/actor 模型，如下所示：
+
+<img src=".\image\RigidBody_01.png" alt="RigidBody_01" style="zoom:150%;" />
+
+| class                | Extends        | Functionality                                                |
+| -------------------- | -------------- | ------------------------------------------------------------ |
+| *PxBase*             | N/A            | 反射/查询对象类型。                                          |
+| *PxActor*            | PxBase         | Actor名称、actor标志、作用域、客户端、聚合、查询世界边界。   |
+| *PxRigidActor*       | PxActor        | Shapes 和 transforms                                         |
+| *PxRigidBody*        | *PxRigidBody*c | 质量，惯性，body flags                                       |
+| *PxRigidStatic*      | PxRigidActor   | 场景中静态主体的接口。这种身体具有隐含的无限质量/惯性。      |
+| *PxRigidDynamic*     | PxRigidBody    | 场景中动态刚体的接口。引入对运动学目标（kinematic targets ）和对象休眠（object sleeping）的支持。 |
+| *PxArticulationLink* | PxRigidBody    | `PxArticulation`中动态刚体链接的接口。介绍对查询关节和相邻链接的支持。 |
+| *PxArticulation*     | PxBase         | 定义`PxArticulation` 的接口。实际上，包含引用多个`PxArticualtionLink`刚体。 |
+
+下图显示了刚体管线中涉及的主要类型之间的关系：
+
+<img src=".\image\RigidBody_02.PNG" alt="RigidBody_02" style="zoom:150%;" />
+
+### The Simulation Loop
+
+现在使用``PxScene::simulate()`方法及时推进世界前进。下面是示例的固定步进器类(fixed stepper class)的简化代码：
+
+```c++
+mAccumulator = 0.0f;
+mStepSize = 1.0f / 60.0f;
+
+virtual bool advance(PxReal dt)
+{
+    mAccumulator  += dt;
+    if(mAccumulator < mStepSize)
+        return false;
+
+    mAccumulator -= mStepSize;
+
+    mScene->simulate(mStepSize);
+    return true;
+}
+```
+
+每当应用完成事件处理并开始空闲时，就会从示例框架中调用此操作。它累积经过的实时时间，直到大于六十分之一秒，然后调用 `simulate()`，它将场景中的所有对象向前移动该间隔时间。这可能是在推进模拟时处理时间的众多不同方法中最简单的方法。
+
+要允许模拟完成并返回结果，只需调用：
+
+```c++
+mScene->fetchResults(true);
+```
+
+`True` 表示模拟应阻塞，直到`simulate()`完成，以便在返回时保证结果可用。当 fetchResults 完成时，您定义的任何模拟事件回调函数也将被调用。请参阅回调序列一章。在模拟过程中，可以从场景中读取和写入。示例利用这一点与物理场并行执行渲染工作。在 fetchResults（） 返回之前，当前模拟步骤的结果不可用。因此，与模拟并行运行渲染会将演员渲染为调用 `simulate()`前的样子。在 `fetchResults()` 返回后，所有这些函数都将返回新的模拟后的状态。有关在模拟运行时读取和写入的更多详细信息，请参阅线程处理一章。为了使人眼将动画运动感知为平滑，每秒至少使用二十个离散帧，每帧对应于一个物理时间步长。要对更复杂的物理场景进行流畅、逼真的模拟，请至少每秒使用五十帧。
+
+**注意： 如果您正在进行实时交互式模拟，则可能会尝试采用不同大小的时间步长，这些步长对应于自上次模拟帧以来经过的实时量。如果这样做，请非常小心，与采用恒定大小的时间步长不同的是：模拟代码对非常小和很大的时间步长都很敏感，并且对时间步长之间的太大变化也很敏感。在这些情况下，它可能会产生抖动模拟（jittery simulation）。**
+
+
+
+
+
+## Rigid Body Collision
+
+### Introduction
+
+----------
+
+本节将介绍刚体碰撞的基础知识。
+
+### Shapes
+
+---------
+
+`Shape`描述actor的空间范围（spatial extent ）和碰撞属性（collision properties ）。它们在` PhysX` 中用于三个目的：确定刚性对象的接触特征的相交性测试(intersection tests )、场景查询测试(scene query tests )（如光线投射）以及定义触发体积(defining trigger volumes )（当其他`Shape`与它们相交时生成通知）。
+
+每个`Shape`都包含一个` PxGeometry` 对象和一个对 `PxMaterial` 的引用，这两个对象都必须在创建时指定。下面的代码创建一个具有球体几何图形和特定材质的`Shape`：
+
+```c++
+PxShape* shape = physics.createShape(PxSphereGeometry(1.0f), myMaterial, true);
+myActor.attachShape(*shape);
+shape->release();
+```
+
+方法 `PxRigidActorExt::createExclusiveShape()` 等效于上面的三行。
+
+用于 `createShape()` 的参数 "true" 通知 SDK 该`Shape`不会与其他参与者共享。当有许多具有相同几何图形的 `Actor` 时，可以使用形状共享来降低模拟的内存成本，但共享形状具有非常严格的限制：在共享形状附加到 `Actor` 时，您无法更新共享形状的属性。
+
+（可选）您可以通过指定类型为 `PxShapeFlags` 的形状标志来配置`Shape`。默认情况下，形状配置为:
+
++ 模拟`Shape`（在模拟期间启用接触生成( contact generation )）
++ 场景查询`Shape`（为场景查询启用）
++ 如果启用了调试渲染，则可视化
+
+为`Shape`指定几何对象时，该几何对象将复制到该`Shape`中。对于可以为`Shape`指定几何图形有一些限制，具体取决于形状标志和父角色的类型。
+
++ 附加到动态`Actor`的模拟`Shape`不支持``TriangleMesh`、`HeightField`和`Plane geometries`，除非动态`Actor`配置为`kinematic`。
++ 触发器`Shape`不支持`TriangleMesh`和`HeightField`几何图形。
+
+有关更多详细信息，请参阅以下部分。
+
+如下所示将`Shape`与`Actor`分离：
+
+```c++
+myActor.detachShape(*shape);
+```
+
+### Simulation Shapes and Scene Query Shapes
+
+------------
+
+`Shape`可以独立配置为参与场景查询(scene queries)和接触测试(contact tests)中的一个或两个。默认情况下，形状将同时参与这两项操作。以下伪代码配置 `PxShape` 实例，使其不再参与`Shape`对交集测试：
+
+```c++
+void disableShapeInContactTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE,false);
+}
+```
+
+可以将 `PxShape` 实例配置为参与`Shape`对交集测试，如下所示：
+
+```c++
+void enableShapeInContactTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE,true);
+}
+```
+
+要从场景查询测试中禁用`PxShape` 实例，请执行以下操作：
+
+```c++
+void disableShapeInSceneQueryTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE,false);
+}
+```
+
+最后，可以在场景查询测试中重新启用 `PxShape` 实例：
+
+```c++
+void enableShapeInSceneQueryTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE,true);
+}
+```
+
+**注意：如果`Shape`的`Actor`的运动根本不需要由模拟控制，那么可以通过在``Actor`上额外禁用模拟来节省内存。例如形状仅用于场景查询，并在必要时手动移动**
+
+### Kinematic Triangle Meshes (Planes, Heighfields)
+
+-----------
+
+可以创建一个运动学`PxRigidDynamic`，它可以具有三角形网格（`plane`，`heighfield`）形状。如果此形状具有模拟形状标志，则此`Actor`必须保持运动学。如果将标志更改为"非模拟"，你甚至可以切换运动标志。要设置运动三角形网格，请参阅以下代码：
+
+```c++
+PxRigidDynamic* meshActor = getPhysics().createRigidDynamic(PxTransform(1.0f));
+PxShape* meshShape;
+if(meshActor)
+{
+    meshActor->setRigidDynamicFlag(PxRigidDynamicFlag::eKINEMATIC, true);
+
+    PxTriangleMeshGeometry triGeom;
+    triGeom.triangleMesh = triangleMesh;
+    meshShape = PxRigidActorExt::createExclusiveShape(*meshActor,triGeom,
+        defaultMaterial);
+    getScene().addActor(*meshActor);
+}
+```
+
+要将运动三角形网格`Actor`切换为动态`Actor`：
+
+```c++
+PxRigidDynamic* meshActor = getPhysics().createRigidDynamic(PxTransform(1.0f));
+PxShape* meshShape;
+if(meshActor)
+{
+    meshActor->setRigidDynamicFlag(PxRigidDynamicFlag::eKINEMATIC, true);
+
+    PxTriangleMeshGeometry triGeom;
+    triGeom.triangleMesh = triangleMesh;
+    meshShape = PxRigidActorExt::createExclusiveShape(*meshActor, triGeom,
+        defaultMaterial);
+    getScene().addActor(*meshActor);
+
+    PxConvexMeshGeometry convexGeom = PxConvexMeshGeometry(convexBox);
+    convexShape = PxRigidActorExt::createExclusiveShape(*meshActor, convexGeom,
+        defaultMaterial);
+```
+
+### Broad-phase Algorithms
+
+---------
+
+`PhysX` 支持多种宽相算法（broad-phase algorithms）：
+
++ *sweep-and-prune (SAP)* 
++ *multi box pruning (MBP)* 
+
+`PxBroadPhaseTyp::eSAP` 是 `PhysX 3.2` 之前使用的默认算法。这是一个很好的通用选择，当许多物体处于睡眠状态时，它具有出色的性能。但是，当所有对象都在移动时，或者当在宽相(broad-phase)中添加或删除大量对象时，性能可能会显著下降。此算法不需要定义世界边界(world bounds)即可工作。`PxBroadPhaseType::eMBP` 是 `PhysX 3.3 `中引入的一种新算法。它是一种替代的宽相(broad-phase)算法，当所有对象都在移动或插入大量对象时，它不会遇到与`eSAP`相同的性能问题。但是，当许多对象处于休眠状态时，其通用性能可能不如 eSAP，并且它要求用户定义世界边界(world bounds)才能工作。所需的宽相(broad-phase)算法由`PxSceneDesc`结构中的`PxBroadPhaseType`枚举控制。
+
+### Regions of Interest
+
+------------
+
+感兴趣的区域(Regions of Interest)是围绕宽相(broad-phase)控制的体积空间中的世界空间AABB包围盒。这些区域中包含的对象由宽相(broad-phase)正确处理。落在这些区域之外的对象将丢失所有碰撞检测。理想情况下，这些区域应覆盖整个游戏空间，同时限制覆盖的空白空间的数量。区域可以重叠，但为了获得最大效率，建议尽可能减少区域之间的重叠量。请注意，AABB 仅接触的两个区域不被视为重叠。例如，`PxBroadPhaseExt::createRegionsFromWorldBounds` helper function通过将给定的世界 AABB 细分为常规 2D 网格来创建许多非重叠区域边界。区域可以由`PxBroadPhaseRegion` 结构定义，也可以由分配给它们的用户数据定义。它们可以在场景创建时或在运行时使用 `PxScene::addBroadPhaseRegion` 函数进行定义。SDK 返回分配给新创建区域的句柄，稍后可以使用 `PxScene::removeBroadPhaseRegion` 函数删除区域。新添加的区域可能会重叠已存在的对象。如果设置了 `PxScene::addBroadPhaseRegion` 调用中的 `populateRegion` 参数，SDK 可以自动将这些对象添加到新区域。但是，此操作并不便宜，并且可能会对性能产生很大影响，尤其是在同一帧中添加多个区域时。因此，建议尽可能禁用它。该区域将被创建为空，并且只会在创建区域后添加到场景中的对象填充，或者在更新时（即当它们移动时）使用先前存在的对象填充该区域。请注意，只有`PxBroadPhaseType::eMBP`需要定义区域。`PxBroadPhaseType::eSAP` 算法则不然。此信息在`PxBroadPhaseCaps`结构中捕获，该结构列出了每个宽相(broad-phase)算法的信息和功能。此结构可以通过 `PxScene::getBroadPhaseCaps` 函数检索。有关当前区域的运行时信息可以使用 `PxScene::getNbBroadPhaseRegions` 和 `PxScene::getBroadPhaseRegions` 函数进行检索。区域的最大数量目前限制为 256 个。
+
+### Broad-phase Callback
+
+----------
+
+可以在 `PxSceneDesc` 结构中定义与宽相位相关(broad-phase-related )的事件的回调。当在指定的感兴趣区域（即"越界"）中发现对象时，将调用此`PxBroadPhaseCallback`对象。SDK 会禁用这些对象的冲突检测。一旦对象重新进入有效区域，它就会自动重新启用。由用户决定如何处理越界对象。典型选项包括：
+
++ 删除对象
++ 让他们继续运动而不会发生碰撞，直到他们重新进入有效区域
++ 手动将他们传送回有效位置
+
+### Collision Filtering
+
+-------------
+
