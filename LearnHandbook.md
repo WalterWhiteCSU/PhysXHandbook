@@ -1469,4 +1469,281 @@ if(meshActor)
 ### Collision Filtering
 
 -------------
+在几乎所有应用程序中，除了微不足道的应用程序之外，都需要免除某些对象对的相交性（interacting），或者以特定方式为交互对（interacting pair）配置 SDK 冲突检测行为。在潜艇样本中，如上所述，当潜艇接触水雷或水雷链条时，我们需要得到通知，以便我们可以将它们炸毁。crab的AI还需要知道crab何时接触到高度场。在了解示例如何实现此目的之前，我们需要了解 SDK filtering系统的可能性。由于filtering可能交互对（interacting pair）发生在仿真引擎的最深处，并且需要应用于彼此靠近的所有对象对，因此它对性能特别敏感。实现它的最简单方法是始终为每个可能交互的对（interacting pair）调用回调函数，其中应用程序基于两个对象指针可以使用一些自定义逻辑（例如咨询其游戏数据库）确定该对是否应该进行交互。不幸的是，如果对于一个非常大的游戏世界来说，这会变得太慢，特别是如果冲突检测处理发生在远程处理器（如GPU）或具有本地内存的其他类型的矢量处理器上，这些处理器必须暂停其并行计算，中断运行游戏代码的主处理器，并让它在继续之前执行回调。即使它要在CPU上执行，它也可能会在多个内核或超线程上同时执行，并且必须放置线程安全代码以确保对共享数据的并发访问是安全的。更好的做法是使用某种可以在远程处理器上执行的固定函数逻辑。这就是我们在 PhysX 2.x 中所做的 - 不幸的是，我们提供的基于组的简单过滤规则（simple group based filtering rules）不够灵活，无法涵盖所有应用程序。在3.0中，我们引入了一个着色器系统，它允许开发人员使用在矢量处理器上运行的代码实现任意规则系统(因此无法访问主内存中的任何最终游戏数据库(eventual game data base ))，这比2.x固定函数过滤更灵活，但同样高效，还有一个完全灵活的回调机制，其中过滤器着色器调用能够访问任何应用程序数据的CPU回调函数， 以性能为代价 -- 有关详细信息，请参阅 `PxSimulationFilterCallback`。最好的部分是，应用程序可以基于每对(per-pair)进行决策，以进行速度与灵活性的权衡。
+
+让我们先看一下着色器系统：下面是由 `SampleSubmarine` 实现的`filter shader`：
+```C++
+PxFilterFlags SampleSubmarineFilterShader(
+    PxFilterObjectAttributes attributes0, PxFilterData filterData0,
+    PxFilterObjectAttributes attributes1, PxFilterData filterData1,
+    PxPairFlags& pairFlags, const void* constantBlock, PxU32 constantBlockSize)
+{
+    // let triggers through
+    if(PxFilterObjectIsTrigger(attributes0) || PxFilterObjectIsTrigger(attributes1))
+    {
+        pairFlags = PxPairFlag::eTRIGGER_DEFAULT;
+        return PxFilterFlag::eDEFAULT;
+    }
+    // generate contacts for all that were not filtered above
+    pairFlags = PxPairFlag::eCONTACT_DEFAULT;
+
+    // trigger the contact callback for pairs (A,B) where
+    // the filtermask of A contains the ID of B and vice versa.
+    if((filterData0.word0 & filterData1.word1) && (filterData1.word0 & filterData0.word1))
+        pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND;
+
+    return PxFilterFlag::eDEFAULT;
+}
+```
+`SampleSubmarineFilterShader`是一个简单的着色器函数，它是`PxFiltering.h`中声明的`PxSimulationFilterShader`原型的实现。`shader filter function`（如上称为 `SampleSubmarineFilterShader`）可能不引用函数的参数及其自己的局部堆栈变量以外的任何内存，因为该函数可以在远程处理器上编译和执行。`SampleSubmarineFilterShader()` 将用于所有彼此靠近的形状对(pairs of shapes) - 更准确地说：对于在世界空间中发现轴对齐边界框首次相交的所有形状对。除此之外的所有行为都由 `SampleSubmarineFilterShader()` 返回的内容决定。`SampleSubmarineFilterShader())` 的参数包括两个对象的 `PxFilterObjectAttributes` 和 `PxFilterData`，以及一个常量内存块。请注意，指向这两个对象的指针不会传递，因为这些指针引用计算机的主内存，并且正如我们所说，这可能不适用于着色器，因此指针不是很有用，因为取消引用它们可能会导致崩溃。`PxFilterObjectAttributes`和`PxFilterData`旨在包含可以从指针中快速收集的所有有用信息。`PxFilterObjectAttributes`是32位数据，用于编码对象的类型：例如`PxFilterObjectType::eRIGID_STATIC`，`PxFilterObjectType::eRIGID_DYNAMIC`，甚至`PxFilterObjectType::ePARTICLE_SYSTEM`。此外，它还可以让您了解对象是运动学的(kinematic,)还是触发器。`PhysX`中的每个`PxShape`和`PxParticleBase`对象都有一个类型为`PxFilterData`的成员变量。这是 128 位用户定义的数据，可用于存储与冲突过滤(collision filtering)相关的应用程序特定信息。这是传递给每个对象的`SampleSubmarineFilterShader()` 的另一个变量。对于常量块。这是应用程序可以提供给着色器进行操作的每个场景的全局信息块。您将需要使用它来编码有关要过滤的内容和不过滤的内容的规则。最后，`SampleSubmarineFilterShader()` 还有一个 `PxPairFlags` 参数。这是一个输出，类似于返回值 `PxFilterFlags`，尽管用法略有不同。`PxFilterFlags` 告诉 SDK 它是否应该永久忽略该对 （eKILL），在重叠时忽略该对，但在过滤其中一个对象的相关数据更改时再次询问 （eSUPPRESS），或者在着色器无法决定时调用性能较低但更灵活的 CPU 回调（eCALLBACK）。`PxPairFlags` 指定了其他标志，这些标志代表模拟将来应针对此对执行的操作。例如，`eNOTIFY_TOUCH_FOUND`意味着当配对真正开始接触时通知用户，而不仅仅是潜在的。
+
+让我们看看上面的着色器是做什么的：
+
+```C++
+// let triggers through
+if(PxFilterObjectIsTrigger(attributes0) || PxFilterObjectIsTrigger(attributes1))
+{
+    pairFlags = PxPairFlag::eTRIGGER_DEFAULT;
+    return PxFilterFlag::eDEFAULT;
+}
+```
+这意味着，如果任一对象是触发器，则执行默认触发器行为（通知应用程序有关触摸的开始和结束），否则在它们之间执行"默认"碰撞检测。
+
+```C++
+// generate contacts for all that were not filtered above
+pairFlags = PxPairFlag::eCONTACT_DEFAULT;
+
+// trigger the contact callback for pairs (A,B) where
+// the filtermask of A contains the ID of B and vice versa.
+if((filterData0.word0 & filterData1.word1) && (filterData1.word0 & filterData0.word1))
+    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND;
+
+return PxFilterFlag::eDEFAULT;
+```
+
+这表示对于所有其他对象，请执行"默认"冲突处理。此外，还有一个基于 `filterDatas` 的规则，用于确定我们要求触摸通知(touch notifications)的特定对。要理解这意味着什么，我们需要知道样本赋予 `filterDatas` 的特殊含义。
+
+示例的需求非常基础，因此我们将使用非常简单的方案来处理它。该示例首先使用自定义枚举为不同的对象类型提供命名代码：
+
+```C++
+struct FilterGroup
+{
+    enum Enum
+    {
+        eSUBMARINE     = (1 << 0),
+        eMINE_HEAD     = (1 << 1),
+        eMINE_LINK     = (1 << 2),
+        eCRAB          = (1 << 3),
+        eHEIGHTFIELD   = (1 << 4),
+    };
+};
+```
+
+该示例通过将每个`Shape`的 `PxFilterData：：word0` 分配给此筛选器组类型来标识每个`Shape`的类型。然后，它放置一个位掩码，指定每种类型的对象，当被 `word0` 类型的对象触摸到 `word1` 中时，这些对象应生成报告。每当创建`Shape`时，都可以在示例中执行此操作，但由于`Shape`创建封装在 `SampleBase` 中，因此在事后使用以下函数完成：
+```C++
+void setupFiltering(PxRigidActor* actor, PxU32 filterGroup, PxU32 filterMask)
+{
+    PxFilterData filterData;
+    filterData.word0 = filterGroup; // word0 = own ID
+    filterData.word1 = filterMask;  // word1 = ID mask to filter pairs that trigger a
+                                    // contact callback;
+    const PxU32 numShapes = actor->getNbShapes();
+    PxShape** shapes = (PxShape**)SAMPLE_ALLOC(sizeof(PxShape*)*numShapes);
+    actor->getShapes(shapes, numShapes);
+    for(PxU32 i = 0; i < numShapes; i++)
+    {
+        PxShape* shape = shapes[i];
+        shape->setSimulationFilterData(filterData);
+    }
+    SAMPLE_FREE(shapes);
+}
+```
+
+这将设置属于传递的 `actor` 的每个`Shape`的 `PxFilterDatas`。以下是如何在 `SampleSubmarine` 中使用它的一些示例：
+```C++
+setupFiltering(mSubmarineActor, FilterGroup::eSUBMARINE, FilterGroup::eMINE_HEAD |
+    FilterGroup::eMINE_LINK);
+setupFiltering(link, FilterGroup::eMINE_LINK, FilterGroup::eSUBMARINE);
+setupFiltering(mineHead, FilterGroup::eMINE_HEAD, FilterGroup::eSUBMARINE);
+
+setupFiltering(heightField, FilterGroup::eHEIGHTFIELD, FilterGroup::eCRAB);
+setupFiltering(mCrabBody, FilterGroup::eCRAB, FilterGroup::eHEIGHTFIELD);
+```
+
+这个方案可能过于简单，无法在实际游戏中使用，但它显示了filter shader的基本用法，并且它将确保为所有有用的对（interesting pairs）调用`SampleSubmarine::onContact()`。在扩展函数 `PxDefaultSimulationFilterShader` 中提供了另一种基于组的过滤机制和源。而且，同样，如果这个基于着色器的系统太不灵活，请考虑使用`PxSimulationFilterCallback`提供的回调方法。
+
+### Aggregates
+---------------
+聚合是`actor`的集合。聚合不提供额外的模拟或查询功能，但允许您告诉 SDK 一组`actor`将聚类在一起，这反过来又允许 SDK 优化其空间数据操作。一个典型的用例是布娃娃，由多个不同的`actor`组成。如果没有聚集体，这会产生与布娃娃中的形状一样多的宽相实体(broad-phase entries)。通常，将布娃娃在广义阶段表示为单个实体，并在必要时在第二次通过时执行内部重叠测试会更有效。另一个潜在的用例是具有大量附加`Shape`的单个Actor。
+
+### Creating an Aggregate
+----------
+从 `PxPhysics` 对象创建聚合：
+
+```C++
+PxPhysics* physics; // The physics SDK object
+
+PxU32 nbActors;     // Max number of actors expected in the aggregate
+bool selfCollisions = true;
+
+PxAggregate* aggregate = physics->createAggregate(nbActors, selfCollisions);
+```
+
+目前，`actor`的最大数量限制为128个，为了提高效率，应尽可能低。如果永远不需要聚合的`actor`之间的碰撞检测，请在创建时禁用它们。这比使用场景过滤机制更有效，因为它绕过了所有内部过滤逻辑。典型的用例是静态或运动学`actor`的聚合。请注意，最大`actor`个数和自冲突属性（self-collision attribute）都是不可变的。
+
+### Populating an Aggregate
+-------
+将`actor`添加到聚合中，如下所示：
+```C++
+PxActor& actor;    // Some actor, previously created
+aggregate->addActor(actor);
+```
+
+请注意，如果 `Actor` 已属于某个场景，则调用将被忽略。将 `Actor` 添加到聚合，然后将聚合添加到场景中，或者将聚合添加到场景中，然后将 `Actor` 添加到聚合中。
+
+要将聚合添加到场景中（在填充之前或之后）：
+
+```C++
+scene->addAggregate(*aggregate);
+```
+
+同样，要从场景中移除聚合，请执行以下操作：
+
+```C++
+scene->removeAggregate(*aggregate);
+```
+
+### Releasing an Aggregate
+------------
+要释放聚合:
+```C++
+PxAggregate* aggregate;    // The aggregate we previously created
+aggregate->release();
+```
+
+释放 `PxAggregate` 不会释放聚合的`actors`。如果 `PxAggregate` 属于某个场景，则 `Actor` 会自动重新插入到该场景中。如果您打算同时删除 `PxAggregate` 及其`actors`，则最有效的方法是先释放`actor`，然后在 `PxAggregate` 为空时释放它。
+
+### Amortizing Insertion
+-------
+在一帧中向场景中添加多个对象可能是一项代价高昂的操作。布娃娃就是这种情况，如前所述，这是 `PxAggregate` 的良好候选者。另一种情况是局部碎片，其自碰撞(self-collisions)经常被禁用。要将对象插入宽相结构(broad-phase structure)的成本摊销到多个阶段结构中，请在 `PxAggregate` 中生成碎片，然后从聚合中删除每个 `Actor` ，然后通过这些帧将其重新插入到场景中。
+
+### Trigger Shapes
+----------
+Trigger Shapes在场景模拟中不起作用（尽管它们可以配置为参与场景查询）。相反，它们的作用是报告与另一种`shape`重叠。不会为相交性测试生成触点，因此触点报告不适用于Trigger Shapes。此外，由于触发器在模拟中不起作用，SDK 将不允许同时引发`eSIMULATION_SHAPE`和 `eTRIGGER_SHAPE`标志;也就是说，如果引发一个标志，则引发另一个标志的尝试将被拒绝，并且错误将传递到错误流。
+
+`SampleSubmarine`中使用了Trigger Shapes来确定潜艇是否已经到达宝藏。在下面的代码中，表示宝藏的 `PxActor` 将其单独形状配置为Trigger Shapes：
+
+```C++
+PxShape* treasureShape;
+gTreasureActor->getShapes(&treasureShape, 1);
+treasureShape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
+treasureShape->setFlag(PxShapeFlag::eTRIGGER_SHAPE, true);
+```
+
+与Trigger Shapes的相交性测试通过 `PxSampleSubmarine` 类（`PxSimulationEventCallback` 的子类）中的` PxSimulationEventCallback::onTrigger` 的实现在 `SampleSubmarine` 中报告：
+
+```C++
+void SampleSubmarine::onTrigger(PxTriggerPair* pairs, PxU32 count)
+{
+    for(PxU32 i=0; i < count; i++)
+    {
+        // ignore pairs when shapes have been deleted
+        if (pairs[i].flags & (PxTriggerPairFlag::eREMOVED_SHAPE_TRIGGER |
+            PxTriggerPairFlag::eREMOVED_SHAPE_OTHER))
+            continue;
+
+        if ((&pairs[i].otherShape->getActor() == mSubmarineActor) &&
+            (&pairs[i].triggerShape->getActor() == gTreasureActor))
+        {
+            gTreasureFound = true;
+        }
+    }
+}
+```
+
+上面的代码循环访问涉及Trigger Shapes的所有重叠形状对。如果发现宝藏已被潜艇触摸，则旗帜`gTreasureFound`为真。
+
+### Interactions
+--------------
+SDK 在内部为宽相(broad-phase)报告的每个重叠对创建一个交互对象。这些对象不仅为成对碰撞的刚体创建，而且还为重叠的触发器对创建。一般来说，用户应该假设无论涉及对象的类型（刚体，触发器，布料等）以及所涉及的`PxFilterFlag`标志如何，都创建了此类对象。目前，每个参与者的此类交互对象限制为 65535 个。如果超过 65535 个交互涉及同一个执行组件，则 SDK 会输出一条错误消息，并忽略额外的交互。
+
+
+## Rigid Body Dynamics
+---------
+
+在本章中，我们将介绍一些主题，当您熟悉了设置基本的刚体模拟世界后，这些主题很重要。
+
+### Velocity
+-------------------
+刚体的运动分为线性和角速度分量。在仿真过程中，`PhysX`将根据重力、其他施加的力和扭矩以及各种约束（如碰撞或关节）来修改物体的速度。
+
+可以使用以下方法读取物体的线性速度和角速度：
+
+```C++
+PxVec3 PxRigidBody::getLinearVelocity();
+PxVec3 PxRigidBody::getAngularVelocity();
+```
+
+可以使用以下方法设置物体的线性速度和角速度：
+
+```C++
+void PxRigidBody::setLinearVelocity(const PxVec3& linVel, bool autowake);
+void PxRigidBody::setAngularVelocity(const PxVec3& angVel, bool autowake);
+```
+
+### Mass Properties
+---------------------------
+动态actor需要质量属性(mass properties)：质量，惯性矩和质量中心框架，它指定Actor的质心位置及其主惯性轴。计算质量属性的最简单方法是使用 `PxRigidBodyExt::updateMassAndInertia（）` helper function，该函数将根据参与者的形状和均匀的密度值设置所有三个属性。此功能的变体允许组合每个形状的密度和手动指定某些质量属性。有关更多详细信息，请参阅 `PxRigidBodyExt` 的参考。North Pole Sample中摇摇晃晃的雪人说明了不同质量属性的使用。雪人就像罗利聚乙烯玩具，通常只是一个空壳，底部装满了一些沉重的材料。低质心导致它们在倾斜后移回直立位置。它们有不同的风格，具体取决于质量属性的设置方式：
+
++ 第一种基本上是无质量的。在Actor的底部只有一个质量相对较高的小球体。由于产生的惯性矩很小，这导致相当快速的运动。雪人感觉很轻。
+
++ 第二种仅使用底部雪球的质量，导致更大的惯性。后来，质心被移动到`actor`的底部。这种近似在物理上是不正确的，但由此产生的雪人感觉更饱满一些。
+
++ 第三个和第四个雪人使用形状来计算质量。不同之处在于，人们首先计算惯性矩（从实际质心），然后将质心移动到底部。另一个计算我们传递给计算例程的低质心的惯性矩。请注意第二种情况的摆动速度要慢得多，尽管两者的质量相同。这是因为头部在惯性矩（与质心的距离平方）中占了更多。
+
++ 最后一个雪人的质量属性是手动设置的。该示例使用惯性矩的粗略值来创建特定的所需行为。对角线张量在 X 中具有低值，在 Y 和 Z 中具有高值，从而产生围绕 X 轴旋转的低阻力和围绕 Y 和 Z 的高阻力。因此，雪人只会围绕X轴来回摆动。
+
+如果您有一个 3x3 惯性矩阵（例如，您的对象有现实生活中的惯性张量），请使用 `PxDiagonalize()` 函数获取主轴和对角惯性张量来初始化 `PxRigidDynamic` `actor`。
+
+当手动设置物体的质量/惯性张量时，`PhysX` 需要质量和每个主惯性轴的正值。但是，在这些值中提供 0 是合法的。
+当提供0质量或惯性值时，PhysX将其解释为表示围绕该主轴的无限质量或惯性。这可用于创建抵抗所有线性运动或抵抗所有或某些角度运动的物体。使用此方法可以实现的效果示例如下：
+
++ 表现得好像是`kinematic`的`body`。
+
++ 其平移是`kinematic`的但其旋转是`dynamic`的`body`。
+
++ 其平移是`dynamic`的，但其旋转是`kinematic`的`body`。
+
++ 只能绕特定轴旋转的`body`。
+
+下面详细介绍了可以取得的成就的一些例子。首先，让我们假设我们正在创建一个共同的结构 - 一个风车。下面提供了构建将成为风车一部分的`body`的代码：
+
+```C++
+PxRigidDynamic* dyn = physics.createRigidDynamic(PxTransform(PxVec3(0.f, 2.5f, 0.f)));
+PxRigidActorExt::createExclusiveShape(*dyn, PxBoxGeometry(2.f, 0.2f, 0.1f), material);
+PxRigidActorExt::createExclusiveShape(*dyn, PxBoxGeometry(0.2f, 2.f, 0.1f), material);
+dyn->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+dyn->setAngularVelocity(PxVec3(0.f, 0.f, 5.f));
+dyn->setAngularDamping(0.f);
+PxRigidStatic* st = mPhysics.createRigidStatic(PxTransform(PxVec3(0.f, 1.5f, -1.f)));
+PxRigidActorExt::createExclusiveShape(*t, PxBoxGeometry(0.5f, 1.5f, 0.8f), material);
+scene.addActor(dyn);
+scene.addActor(st);
+```
+
+上面的代码为风车创建了一个静态箱形框架，并创建了一个十字形来表示风车的叶片。我们关闭风车叶片上的重力和角度阻尼，并赋予其初始角速度。因此，该风车叶片将无限期地以恒定的角速度旋转。但是，如果另一个物体与风车相撞，我们的风车将停止正常运行，因为风车叶片将被撞出原位。有几种选择可以使风车叶片在其他物体与之相互作用时保持在正确的位置。其中一种方法可能是使风车具有无限的质量和惯性。在这种情况下，与物体的任何相互作用都不会影响风车：
+
+```C++
+dyn->setMass(0.f);
+dyn->setMassSpaceInertiaTensor(PxVec3(0.f));
+```
+
+此示例无限期地保留了风车以恒定角速度旋转的先前行为。然而，现在`body`的速度不能受到任何约束的影响，因为身体有无限的质量和惯性。如果一个物体与风车片相撞，碰撞的行为就好像风车片是一个`kinematic`物体。另一种选择是使风车具有无限的质量，并将其旋转限制在身体的局部z轴周围。这将提供与在风车和静态风车框架之间应用旋转接头相同的效果：
+
+```C++
+dyn->setMass(0.f);
+dyn->setMassSpaceInertiaTensor(PxVec3(0.f, 0.f, 10.f));
+```
+
+在这两个例子中，`body`的质量都设置为0，表明身体具有无限的质量，因此其线速度不能被任何约束改变。但是，在此示例中，`body`的惯性被配置为允许主体的角速度受围绕一个主轴或惯性的约束的影响。这提供了与引入旋转接头类似的效果。z轴周围的惯性值可以增加或减少，以使风车对运动的抵抗力更大/更小。
 
