@@ -1787,10 +1787,48 @@ shape->release();
 将`Shape`与`Actor``Detach`，如下所示：
 
 ```C++
-
+myActor.detachShape(*shape);
 ```
 
+注意
+在以前版本的 `PhysX` 中，`release()` 用于将`Shape`与其执行组件分离并销毁它。release（） 的这种用法在` PhysX 3.3` 中已弃用，在 `PhysX` 的未来版本中将不受支持。
 
+### Simulation Shapes and Scene Query Shapes
+--------------------------
+`Shape`可以独立配置为参与场景查询和相交性测试中的一个或两个。默认情况下，`Shape`将同时参与这两项操作。
 
+以下伪代码配置 `PxShape` 实例，使其不再参与`Shape`对相交性测试：
 
+```C++
+void disableShapeInContactTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE,false);
+}
+```
+
+可以将 `PxShape` 实例配置为参与`Shape`对相交性测试测试，如下所示：
+
+```C++
+void enableShapeInContactTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE,true);
+}
+```
+
+要从场景查询测试中禁用 `PxShape` 实例，请执行以下操作：
+
+```C++
+void disableShapeInSceneQueryTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE,false);
+}
+```
+最后，可以在场景查询测试中重新启用 `PxShape` 实例：
+
+```C++
+void enableShapeInSceneQueryTests(PxShape* shape)
+{
+    shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE,true);
+}
+```
 
