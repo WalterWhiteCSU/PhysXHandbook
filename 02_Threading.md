@@ -14,7 +14,7 @@
 
 由于各种原因，`PhysX`不会在内部锁定应用程序对其数据结构的访问，所以当我们在多线程应用中调用API时需要小心。规则如下：
 
-+ 标记为'const'的API接口方法是只读的， 其他的接口是写的。
++ 标记为`const`的API接口方法是只读的， 其他的接口是写的。
 + 多线程下可以同时调用多个只读接口。
 + 不同场景中的对象能够通过不同的线程安全地获取。
 + 场景外的不同对象可以从不同的线程安全地访问，注意访问一个对象可能会通过持久性引用间接获取另一个对象。（一个actor引用一个shape，一个shape引用一个mesh，joint和actors相互引用）
@@ -51,7 +51,7 @@ void PxScene::unlockWrite();
 + 一个线程持有写锁它能够同时读和写。
 + 支持Re-entrant 读锁，一个线程已经获取一个读锁仍然允许调用`lockRead()`。每一个`lockRead()`必须有一个`unlockRead()`。
 + 支持Re-entrant写锁， 一个线程已经获取一个写锁仍然允许调用`lockWrite()`。每一个`lockWrite()`必须有一个`unlockWrite()`。
-+ 允许已经获取了写锁的线程调用`lockRead()`，线程将仍然能读和写。每一个`lock*()`必须有`unlock*()`。
++ 允许已经获取了写锁的线程调用`lockRead()`，线程将仍然能读和写。每一个`lock()`必须有`unlock()`。
 + 不支持lock upgrading。不允许持有读锁的线程`lockWrite()`。在checked build中这样做会报错，在release build中会导致deadlock。
 + Writers are favored。如果线程获取到读锁后`lockWrite()`会阻断所有的reader离开。如果新的reader在writer线程被阻塞时到达，它们(reader)将被置于睡眠，并且writer先访问场景。
 + 如果多个writer在队列中，第一个writer优先级最高，后续的writer将根据OS的scheduling被授予访问权限。
@@ -93,7 +93,7 @@ scene->fetchResults(true);
 
 在第二种slot中，模拟正在运行且在读写数据。来自用户的并发访问会修改对象的状态或者导致数据竞争或导致模拟代码中的试图不一致（inconsistent views in the simulation code）。因此，模拟中的代码中的对象受到保护，不会受到API写入的影响，并且模拟更新的任何属性都会被缓冲以允许API读取。
 
-注意`simulate()``fetchResults()`是写调用，被调用禁止对于任何对象的访问。
+注意`simulate()`,`fetchResults()`是写调用，被调用禁止对于任何对象的访问。
 
 ### Double Buffering
 
@@ -101,7 +101,7 @@ scene->fetchResults(true);
 
 `PhysX`支持在模拟运行时对场景中的对象进行读写操作。这包括添加/移除到场景。
 
-从用户的角度来看，API 更改会立即反映出来。例如：如果设定了刚体的速度并进行查询，则会返回新的速度。相似的，如果在模拟进行中时创建了对象，它能够被其他任何对象访问或者修改。当然了，这些改变都在缓存中所以模拟的代码指挥看到调用`PxScene::simulate()`时的对象状态。改变对象filter data只会影响下一步模拟step，运行中的模拟对正在运行的step会忽略掉。
+从用户的角度来看，API 更改会立即反映出来。例如：如果设定了刚体的速度并进行查询，则会返回新的速度。相似的，如果在模拟进行中时创建了对象，它能够被其他任何对象访问或者修改。当然了，这些改变都在缓存中所以模拟的代码只会看到调用`PxScene::simulate()`时的对象状态。改变对象filter data只会影响下一步模拟step，运行中的模拟对正在运行的step会忽略掉。
 
 当`PxScene::fetchResults()`被调用时，任何buffer的改变会被flush：模拟对对象的改变会被反射到API视图上，API的改变会在模拟的下一个step中可见。用户的修改会更优先：当模拟运行时用户修改了一个对象的position，则用户修改的数据会覆盖模拟的结构写入结果中。延迟应用更新不会影响场景查询，场景查询始终会考虑最新的更改。
 
@@ -111,8 +111,8 @@ scene->fetchResults(true);
 
 模拟运行时删除对象或者将对象移除出场景会影响发送给`PxScene::fetchResults()`的事件。
 
-+ 运行期间如果一个对象被删除或者移除将不会移除出`PxSimulationEventCallback::onWake()``PxSimulationEventCallback()::onSleep()`
-+ 但是会移除出`PxSimulationEventCallback::onContact()``PxSimulationEventCallback::onTrigger()`。对象将被标记为`PxContactPairHeaderFlag::eREMOVED_ACTOR_0``PxContactPairFlag::eREMOVED_SHAPE_0``PxTriggerPairFlag::eREMOVED_SHAPE_TRIGGER`。此外，如果为包含已删除/已移除对象的对请求 `PxPairFlag::eNOTIFY_TOUCH_LOST`，`PxPairFlag::eNOTIFY_THRESHOLD_FORCE_LOST`事件，则将创建这些事件。
++ 运行期间如果一个对象被删除或者移除将不会移除出`PxSimulationEventCallback::onWake()`,`PxSimulationEventCallback()::onSleep()`
++ 但是会移除出`PxSimulationEventCallback::onContact()``PxSimulationEventCallback::onTrigger()`。对象将被标记为`PxContactPairHeaderFlag::eREMOVED_ACTOR_0`,`PxContactPairFlag::eREMOVED_SHAPE_0`,`PxTriggerPairFlag::eREMOVED_SHAPE_TRIGGER`。此外，如果为包含已删除/已移除对象的对请求 `PxPairFlag::eNOTIFY_TOUCH_LOST`，`PxPairFlag::eNOTIFY_THRESHOLD_FORCE_LOST`事件，则将创建这些事件。
 
 ### Support
 

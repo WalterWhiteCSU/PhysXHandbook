@@ -118,11 +118,11 @@ physx::PxPhysics* customCreatePhysics(physx::PxU32 version,
 
 ------------------------------
 
-在`PhysX``PhysXCooking``PhysXCommon`和`PxPvdSDK`项目中，`PhysXCommon DLL` `PxFoundation DLL`和``PxPvdSDK DLL`被标记为延迟装载(Delay-Loading)
+在`PhysX` ,`PhysXCooking` ,`PhysXCommon`和`PxPvdSDK`项目中，`PhysXCommon DLL` `PxFoundation DLL`和`PxPvdSDK DLL`被标记为延迟装载(Delay-Loading)
 
 ### PhysXCommon DLL and PxFoundation DLL load
 
-应用程序链接到PhysXCommon DLL，会在装在其他DLL之前先装载`PxFoundation.dll`、`PxPvdSDK `和`PhysXCommon.dll`。应用程序装载的DLL必须和`PhysX`和`PhysXCooking DLLs`使用的一样。在`PhysX`和`PhysXCooking DLLs`中关于`PhysXCommon``PxFoundation`和`PxPvdSDK`由如下规则构成：
+应用程序链接到PhysXCommon DLL，会在装在其他DLL之前先装载`PxFoundation.dll`、`PxPvdSDK `和`PhysXCommon.dll`。应用程序装载的DLL必须和`PhysX`和`PhysXCooking DLLs`使用的一样。在`PhysX`和`PhysXCooking DLLs`中关于`PhysXCommon`,`PxFoundation`和`PxPvdSDK`由如下规则构成：
 
 + 如果延迟加载hook指定了`PhysXCommon`名称，则使用用户提供的`PhysXCommon`或`PxPvdSDK`名称
   + 如果延迟加载hook没有指定，则会使用相应的`PhysXCommon``PxFoundation`或者`PxPvdSDK`
