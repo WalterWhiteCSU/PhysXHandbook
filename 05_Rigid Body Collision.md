@@ -10,7 +10,7 @@
 
 ---------
 
-`Shape`描述actor的空间范围（spatial extent ）和碰撞属性（collision properties ）。它们在` PhysX` 中用于三个目的：确定刚性对象的接触特征的相交性测试(intersection tests )、场景查询测试(scene query tests )（如光线投射）以及定义触发体积(defining trigger volumes )（当其他`Shape`与它们相交时生成通知）。
+`Shape`描述actor的空间范围（spatial extent ）和碰撞属性（collision properties ）。它们在` PhysX` 中用于三个目的：确定刚性对象的接触特征的相交性测试(intersection tests )、场景查询测试(scene query tests)（如光线投射）以及定义触发体积(defining trigger volumes)（当其他`Shape`与它们相交时生成通知）。
 
 每个`Shape`都包含一个` PxGeometry` 对象和一个对 `PxMaterial` 的引用，这两个对象都必须在创建时指定。下面的代码创建一个具有球体几何图形和特定材质的`Shape`：
 
