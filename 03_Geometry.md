@@ -241,9 +241,9 @@ PxConvexMeshDesc convexDesc;
 convexDesc.points.count             = 12;
 convexDesc.points.stride            = sizeof(PxVec3);
 convexDesc.points.data              = convexVerts;
-convexDescPolygons.polygons.count   = 20;
-convexDescPolygons.polygons.stride  = sizeof(PxHullPolygon);
-convexDescPolygons.polygons.data    = hullPolygons;
+convexDesc.polygons.count   = 20;
+convexDesc.polygons.stride  = sizeof(PxHullPolygon);
+convexDesc.polygons.data    = hullPolygons;
 convexDesc.flags                    = 0;
 
 PxDefaultMemoryOutputStream buf;
@@ -724,5 +724,4 @@ hfShape->setGeometry(PxHeightFieldGeometry(pHeightField, ...));
 ```
 
 另请注意，当对象位于旧几何或新几何体之上时，`PxShape::setGeometry() `不保证正确/连续的行为。方法 `PxHeightField::getTimestamp()` 返回Height Fields被修改的次数。
-
 

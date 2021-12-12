@@ -196,7 +196,7 @@ PxSceneDesc sceneDesc(mPhysics->getTolerancesScale());
 
 -----------
 
-`Task`类时标准的task类型。每个模拟step都必须将`Task`提交给 TaskManager 才能执行这些任务。`Task`可以在提交时命名，这样它们能被发现。提交`Task`时，将为其提供引用计数 1，并且 TaskManager::startSimulation() 函数会递减所有任务的引用计数，并调度引用计数为零的所有任务。在调用 TaskManager::startSimulation() 之前，`Task`可以设置彼此之间的依赖关系，以控制它们的调度顺序。一旦模拟开始，仍然可以提交新任务并添加依赖项，但由程序员来避免race hazards。您不能向已分派的任务添加依赖关系，并且新提交的任务的引用计数必须递减，然后才能允许执行该任务。
+`Task`类是标准的task类型。每个模拟step都必须将`Task`提交给 TaskManager 才能执行这些任务。`Task`可以在提交时命名，这样它们能被发现。提交`Task`时，将为其提供引用计数 1，并且 TaskManager::startSimulation() 函数会递减所有任务的引用计数，并调度引用计数为零的所有任务。在调用 TaskManager::startSimulation() 之前，`Task`可以设置彼此之间的依赖关系，以控制它们的调度顺序。一旦模拟开始，仍然可以提交新任务并添加依赖项，但由程序员来避免race hazards。您不能向已分派的任务添加依赖关系，并且新提交的任务的引用计数必须递减，然后才能允许执行该任务。
 
 此外还可以使用任务名称定义同步点（Synchronization points），`TaskManager`将为该名称分配一个不带任务实现(Task implementation)的TaskID。当满足所有命名 TaskID 的依赖项时，它将递减具有该名称的所有任务的引用计数。`APEX `几乎专门使用 `Task `类来管理 CPU 资源。`ApexScene `定义了许多命名任务，模块使用这些任务来计划自己的任务（例如：在 LOD 计算完成后开始，在 PhysX 场景逐步执行之前完成）。
 

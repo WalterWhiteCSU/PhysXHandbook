@@ -134,6 +134,7 @@ PxActor::setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
 `PxActorFlag::eDISABLE_GRAVITY` 的替代方法是对整个场景使用零重力矢量，然后将自己的重力施加到刚体上，每帧。这可用于创建径向重力场，如 `SampleCustomGravity` 中所示。
 
 ## Friction and Restitution
+
 --------------------------
 所有物理对象都至少有一种材质，该材质定义了用于解决与对象碰撞的摩擦和恢复属性。
 
@@ -173,7 +174,7 @@ void PxSimulationEventCallback::onSleep(PxActor** actors, PxU32 count) = 0;
 
 有关详细信息，请参阅 Callback Sequence 和 Sleep state change events 小节。
 
-当`Actor`的动能在一段时间内低于给定阈值时，它就会进入睡眠状态。基本上，每个动态刚性 `Actor` 都有一个唤醒计数器，当 `Actor` 的动能低于指定的阈值时，该计数器会因仿真时间步长而递减。但是，如果在仿真步骤后能量高于阈值，则计数器将重置为最小默认值，并且整个过程将重新开始。一旦唤醒计数器达到零，它就不会进一步减少，并且 `Actor` 可以进入睡眠状态。请注意，零唤醒计数器并不意味着`Actor`必须处于睡眠状态，它仅表示它已准备好进入睡眠状态。还有其他因素可能会让`Actor`保持更长时间的清醒。
+当`Actor`的动能在一段时间内低于给定 `Threshold `时，它就会进入睡眠状态。基本上，每个动态刚性 `Actor` 都有一个`wake counter`，当 `Actor` 的动能低于指定的`threshold`时，该计数器会因仿真时间  `step `而递减。但是，如果在仿真`step`后能量高于`threshold`，则`wake counter`将重置为最小默认值，并且整个过程将重新开始。一旦`wake counter`达到零，它就不会进一步减少，并且 `Actor` 可以进入睡眠状态。请注意，零`wake counter`并不意味着`Actor`必须处于睡眠状态，它仅表示它已准备好进入睡眠状态。还有其他因素可能会让`Actor`保持更长时间的清醒。
 
 能量阈值以及 `Actor` 保持清醒的最短时间可以使用以下方法进行操作：
 
@@ -252,6 +253,7 @@ void PxSimulationEventCallback::onSleep(PxActor** actors, PxU32 count) = 0;
 若要使用睡眠状态事件来检测转换，必须保留感兴趣对象的睡眠状态记录，例如在哈希中。处理事件时，此记录可用于检查是否存在转换。
 
 ## Kinematic Actors
+
 ----------------------
 有时，使用力或约束来控制`Actor`不够强大、精确或灵活。例如，moving platforms或character controllers通常需要操纵`Actor`的位置，或者让它完全遵循特定的路径。这种控制方案由`kinematic actors`提供。
 
@@ -331,6 +333,7 @@ for (PxU32 i=0; i < nbActiveActors; ++i)
 **由于 kinematic rigid bodies的目标变换由用户设置，因此可以通过设置标志`PxSceneFlag：：eEXCLUDE_KINEMATICS_FROM_ACTIVE_ACTORS`将kinematic从列表中排除。**
 
 ## Dominance
+
 ------------
 Dominance是一种使动态物体能够相互支配的机制。Dominance有效地将dominant body注入无限质量的一对。这是约束求解器内局部质量修改的一种形式，因此可以覆盖一对中一个物体的质量。通过接触修改中的局部大规模修改可以达到类似的效果，但dominance的优势在于在SDK中自动处理，因此不会产生接触修改的额外内存和性能开销。
 
@@ -409,6 +412,7 @@ void PxRigidDynamic::setSolverIterationCounts(PxU32 minPositionIters, PxU32 minV
 Solver将contacts分组为friction patches;friction patches是一组contacts，它们共享相同的材料并具有相似的contact normals。但是，Solver允许每个contact manager（一对Shape）最多有 32 个friction patches。如果产生超过 32 个friction patches（这可能是由于非常复杂的碰撞几何Shape或非常大的contact offsets），Solver将忽略剩余的friction patches。发生这种情况时，checked/debug版本中将出现警告。
 
 ## Immediate Mode
+
 ------------------
 除了使用 `PxScene` 进行模拟外， `PhysX` 还提供了一个名为"immediate mode"的低级模拟API。这提供了一个 API 来访问低contact generation和constraint solver。此方法目前仅支持 CPU 刚体，不支持articulations、clothing或particles。
 
@@ -436,8 +440,7 @@ PX_C_EXPORT PX_PHYSX_CORE_API void PxConstructStaticSolverBody(const PxTransform
 以下函数是可选的，用于批处理约束(batch constraints)：
 
 ```C++
-PX_C_EXPORT PX_PHYSX_CORE_API PxU32 PxBatchConstraints(PxSolverConstraintDesc* solverConstraintDescs, const PxU32 nbConstraints, PxSolverBody* solverBodies, PxU32 nbBodies, PxConstraintBatchHeader* outBatchHeaders,
-        PxSolverConstraintDesc* outOrderedConstraintDescs);
+PX_C_EXPORT PX_PHYSX_CORE_API PxU32 PxBatchConstraints(PxSolverConstraintDesc* solverConstraintDescs, const PxU32 nbConstraints, PxSolverBody* solverBodies, PxU32 nbBodies, PxConstraintBatchHeader* outBatchHeaders,PxSolverConstraintDesc* outOrderedConstraintDescs);
 ```
 
 batch constraints对提供的constraints重新排序并生成批处理标题，solver可以使用这些批处理标题来加速约束求解(constraint solving)，方法是将独立约束(constraints)组合在一起并使用 SIMD 寄存器中的多个通道并行求解。此过程是完全可选的，如果不需要，可以绕过。请注意，这将更改constraints的处理顺序，这可能会更改求解器(solver)的结果。
@@ -445,8 +448,7 @@ batch constraints对提供的constraints重新排序并生成批处理标题，s
 提供了以下方法来创建接触约束(contact constraints)：
 
 ```C++
-PX_C_EXPORT PX_PHYSX_CORE_API bool PxCreateContactConstraints(PxConstraintBatchHeader* batchHeader, const PxU32 nbHeaders, PxSolverContactDesc* contactDescs,
-        PxConstraintAllocator& allocator, PxReal invDt, PxReal bounceThreshold, PxReal frictionOffsetThreshold, PxReal correlationDistance);
+PX_C_EXPORT PX_PHYSX_CORE_API bool PxCreateContactConstraints(PxConstraintBatchHeader* batchHeader, const PxU32 nbHeaders, PxSolverContactDesc* contactDescs,PxConstraintAllocator& allocator, PxReal invDt, PxReal bounceThreshold, PxReal frictionOffsetThreshold, PxReal correlationDistance);
 ```
 
 该方法可以与 `PxGenerateContacts` 产生的contacts或由特定于应用的contact generation approaches产生的contacts一起提供。
@@ -464,8 +466,7 @@ PX_C_EXPORT PX_PHYSX_CORE_API bool PxCreateJointConstraintsWithShaders(PxConstra
 以下方法解决了这些约束：
 
 ```C++
-PX_C_EXPORT PX_PHYSX_CORE_API void PxSolveConstraints(PxConstraintBatchHeader* batchHeaders, const PxU32 nbBatchHeaders, PxSolverConstraintDesc* solverConstraintDescs, PxSolverBody* solverBodies,
-        PxVec3* linearMotionVelocity, PxVec3* angularMotionVelocity, const PxU32 nbSolverBodies, const PxU32 nbPositionIterations, const PxU32 nbVelocityIterations);
+PX_C_EXPORT PX_PHYSX_CORE_API void PxSolveConstraints(PxConstraintBatchHeader* batchHeaders, const PxU32 nbBatchHeaders, PxSolverConstraintDesc* solverConstraintDescs, PxSolverBody* solverBodies,PxVec3* linearMotionVelocity, PxVec3* angularMotionVelocity, const PxU32 nbSolverBodies, const PxU32 nbPositionIterations, const PxU32 nbVelocityIterations);
 ```
 
 此方法执行所有必需的位置和速度迭代，并更新对象的 delta 速度和 motion 速度，这些速度分别存储在 `PxSolverBody` 和 `linear/angularMotionVelocity` 中。
