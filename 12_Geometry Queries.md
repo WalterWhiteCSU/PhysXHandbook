@@ -291,3 +291,31 @@ flags specifies which fields of the structure are valid.
 
 **PhysX 3.3 中的一个已知问题是，未设置 eMTD 标志时，对凸网格进行扫描的人脸指数未定义。**
 
+### Precise Sweeps
+------------------
+PxHitFlag：：ePRECISE_SWEEP支持更准确的扫描代码（默认情况下使用可能更快但不太准确的解决方案）。ePRECISE_SWEEP标志与通货膨胀参数或标志PxHitFlag：：eMTD不兼容。
+
+#### Sweeps against Height Fields
+----------------------------------
++ Height fields are treated as thin triangle surfaces rather than solid objects.
+
++ Thickness magnitude has no effect on initial overlap detection or point of impact.
+
++ For single-sided height fields the normal of the hit will face in +y local space direction if thickness is < 0 and -y when thickness is > 0.
+
++ Height fields are treated as double sided if either one of eDOUBLE_SIDED or eMESH_BOTH_SIDES flags are used.
+    + The returned hit normal will always face the sweep direction. 
+
++ eMESH_ANY flag has no effect.
+
++ ePRECISE_SWEEP flag has no effect.
+
+#### Pitfalls
+--------------
+使用扫描时需要注意一些陷阱：
+
++ 由于数值精度问题，当对象具有非常大的尺寸差异时，可能会返回不正确的结果。
+
++ 由于算法差异，扫描查询可能会检测到一组与重叠查询不同的初始重叠形状。特别是，仅仅执行重叠检查以确定 PxHitFlag：：eIGNORE_INITIAL_OVERLAP 标志的安全性是不够的。需要一致的重叠/扫描/穿透深度信息的应用程序应使用扫描检查和初始重叠测试和PxHitFlag：：eMTD标志。
+
+
