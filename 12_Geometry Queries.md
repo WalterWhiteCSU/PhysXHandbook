@@ -318,4 +318,98 @@ PxHitFlag：：ePRECISE_SWEEP支持更准确的扫描代码（默认情况下使
 
 + 由于算法差异，扫描查询可能会检测到一组与重叠查询不同的初始重叠形状。特别是，仅仅执行重叠检查以确定 PxHitFlag：：eIGNORE_INITIAL_OVERLAP 标志的安全性是不够的。需要一致的重叠/扫描/穿透深度信息的应用程序应使用扫描检查和初始重叠测试和PxHitFlag：：eMTD标志。
 
+## Additional PxGeometryQuery functions
+----------------------------------------
+<img src=".\image\GeomQuery_6.png" alt="GeomQuery_6" style="zoom:100%;" />
 
+以下函数计算点与几何对象之间的距离。仅支持实体对象（方体、球体、胶囊体、凸体）：
+
+```C++
+PxReal dist = PxGeometryQuery::pointDistance(point, geom, pose, closestPoint);
+```
+
+closepoint 是返回最近点的可选输出参数。
+
+<img src=".\image\GeomQuery_7.png" alt="GeomQuery_7" style="zoom:100%;" />
+
+以下函数计算包围几何对象的轴对齐边界框 （AABB），给定其姿势：
+
+```C++
+PxBounds3 bounds = PxGeometryQuery::getWorldBounds(geom, pose, inflation);
+```
+
+边界框按通货膨胀值缩放，如果未明确指定，则默认为 1.01f。
+
+## PxMeshQuery
+---------------
+PhysX 提供了额外的功能，用于获取三角形网格和高度场重叠的多个结果，以及针对三角形数组进行扫描。只有盒子、球体和胶囊可以使用这些函数针对网格或高度场进行测试。
+
+### Mesh Overlaps
+-----------------
+以下代码说明了如何处理接触给定球面体积的网格三角形：
+
+```C++
+PxU32 triangleIndexBuffer[bufferSize];
+PxU32 startIndex = 0;
+bool bufferOverflowOccured = false;
+PxU32 nbTriangles = PxMeshQuery::findOverlapTriangleMesh(sphereGeom, spherePose,
+                                                         meshGeom, meshPose,
+                                                         triangleIndexBuffer, bufferSize,
+                                                         startIndex, bufferOverflowOccured);
+
+for(PxU32 i=0; i < nbTriangles; i++)
+{
+    PxTriangle tri;
+    PxU32 vertexIndices[3];
+    PxMeshQuery::getTriangle(meshGeom, meshPose, triangleIndexBuffer[i], tri, vertexIndices);
+
+     ...  // process triangle info
+}
+```
+
+findOverlapTriangleMesh 方法用于提取三角形的索引：
+
++ sphereGeom and spherePose specify the region to test for overlap. 
++ meshGeom and meshPose specify the mesh and its pose. 
++ triangleIndexBuffer and triangleSize specify the output buffer and its size. 
++ startIndex is used to restart the query if the buffer size is exceeded. In this case, to query for more triangles set this parameter to the number retrieved so far. 
++ bufferOverflowOccured is set if more triangles would be returned from the query than would fit in the buffer. 
+
+高度字段也存在类似的查询功能。
+
+### Sweeps against Triangles
+-----------------------------
+有时，例如，在使用网格重叠 API 时，能够对三角形组进行扫描非常方便。PhysX 提供了一个专门用于此目的的功能，具有以下签名：
+
+```C++
+bool sweep(const PxVec3& unitDir,
+           const PxReal distance,
+           const PxGeometry& geom,
+           const PxTransform& pose,
+           PxU32 triangleCount,
+           const PxTriangle* triangles,
+           PxSweepHit& sweepHit,
+           PxHitFlags hitFlags = PxHitFlag::eDEFAULT,
+           const PxU32* cachedIndex = NULL,
+           const PxReal inflation = 0.0f,
+           bool doubleSided = false);
+```
+
+参数解释如下：
+
++ unitDir, distance, geom and pose function identically to the first four parameters of PxGeometryQuery::sweep(). distance is clamped to PX_MAX_SWEEP_DISTANCE. 
++ triangleCount is the number of triangles contained in the buffer against which to sweep. 
++ triangles is the buffer of triangles. 
++ hitFlags specifies the required information in the output. 
++ cachedIndex, if set, specifies the index of a triangle to test first. This can be a useful optimization when repeatedly sweeping against the same set of triangles. 
++ inflation functions identically to the inflation parameter of PxGeometryQuery::sweep(). 
++ doubleSided indicates whether the input triangles are double-sided or not. This is equivalent to the PxMeshGeometryFlag::eDOUBLE_SIDED flag - that is, it suppresses backface culling, and for any hit the returned normal faces opposite to the sweep direction (see Raycasts against Triangle Meshes). 
+
+与其他扫描查询相比，此函数具有额外的限制：
+
++ the geometry type must be either a sphere, a capsule or a box. Convex geometry is not supported. 
++ the function returns a single hit. Multiple hits (and in particular PxHitFlag::eMESH_MULTIPLE) are not supported. 
++ The function always returns the closest hit. 
++ The only supported flags are PxHitFlag::eDEFAULT, PxHitFlag::eASSUME_NO_INITIAL_OVERLAP, PxHitFlag::ePRECISE_SWEEP, PxHitFlag::eMESH_BOTH_SIDES and PxHitFlag::eMESH_ANY. 
+
+该函数按给定的顺序测试每个输入三角形。默认情况下，该函数将测试所有三角形并返回最接近的扫描命中（如果已找到命中）。如果使用PxHitFlag：：eMESH_ANY，则一旦找到命中，该函数将立即返回（跳过剩余的未测试三角形）。此标志还可用于模拟 PxHitFlag：：eMESH_MULTIPLE，方法是使用 PxHitFlag：：eMESH_ANY 重复调用函数，使用以前返回的命中三角形作为起点（其索引介于 0 和 'triangleCount' 之间，可在 sweepHit.faceIndex 中使用）。
