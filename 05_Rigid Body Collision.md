@@ -10,7 +10,7 @@
 
 ---------
 
-`Shape`描述actor的空间范围(spatial extent )和碰撞属性(collision properties )。它们在`PhysX` 中用于三个目的：确定`rigid objects`的接触特征的相交性测试(intersection tests)、场景查询测试(scene query tests)(如raycasts)以及定义触发体积(defining trigger volumes)(当其他`Shape`与它们相交时生成通知)。
+`Shape`描述actor的空间范围(spatial extent)和碰撞属性(collision properties)。它们在`PhysX` 中用于三个目的：确定`rigid objects`的接触特征的相交性测试(intersection tests)、场景查询测试(scene query tests)(如raycasts)以及定义触发体积(defining trigger volumes)(当其他`Shape`与它们相交时生成通知)。
 
 每个`Shape`都包含一个`PxGeometry` 对象和一个对 `PxMaterial` 的引用，这两个对象都必须在创建时指定。下面的代码创建一个具有球体几何图形和特定材质的`Shape`：
 
@@ -47,7 +47,7 @@ myActor.detachShape(*shape);
 
 ------------
 
-`Shape`可以独立配置为参与场景查询(scene queries)和接触测试(contact tests)中的一个或两个。默认情况下，`Shape`将同时参与这两项操作。以下伪代码配置 `PxShape` 实例，使其不再参与`Shape`对交集测试(shape pair intersection tests)：
+`Shape`可以独立配置为参与场景查询(scene queries)和接触测试(contact tests)中的一个或两个。默认情况下，`Shape`将同时参与这两项操作。以下伪代码配置 `PxShape` 实例，使其不再参与`Shape`对相交测试(shape pair intersection tests)：
 
 ```c++
 void disableShapeInContactTests(PxShape* shape)
@@ -56,7 +56,7 @@ void disableShapeInContactTests(PxShape* shape)
 }
 ```
 
-可以将 `PxShape` 实例配置为参与`Shape`对交集测试(shape pair intersection tests)，如下所示：
+可以将 `PxShape` 实例配置为参与`Shape`对相交测试(shape pair intersection tests)，如下所示：
 
 ```c++
 void enableShapeInContactTests(PxShape* shape)
@@ -154,6 +154,7 @@ if(meshActor)
 + 手动将他们传送回有效位置
 
 ## Collision Filtering
+
 -------------
 在几乎所有应用程序中，除了"trivial"的应用程序之外，都需要免除某些对象对(pairs of objects)的相交性(interacting)，或者以特定方式为交互对(interacting pair)配置 SDK 碰撞检测行为。在submarine sample中，如上所述，当潜艇接触水雷或水雷链条时，我们需要得到通知，以便我们可以将它们炸毁。crab中的AI还需要知道crab何时接触到高度场。在了解示例如何实现此目的之前，我们需要了解SDK filtering系统。由于过率潜在的交互对(interacting pair)发生在仿真引擎的最深处，并且需要应用于彼此靠近的所有对象对，因此它对性能特别敏感。实现它的最简单方法是始终为每个可能交互的对(interacting pair)调用回调函数，其中应用程序基于两个对象指针可以使用一些自定义逻辑(例如咨询其游戏数据库)确定该对是否应该进行交互。不幸的是，如果对于一个非常大的游戏世界来说，这会变得太慢，特别是如果碰撞检测处理发生在远程处理器(如GPU)或具有本地内存的其他类型的矢量处理器上，这些处理器必须暂停其并行计算，中断运行游戏代码的主处理器，并让它在继续之前执行回调。即使它要在CPU上执行，它也可能会在多个内核或超线程上同时执行，并且必须放置线程安全代码以确保对共享数据的并发访问是安全的。更好的做法是使用某种可以在远程处理器上执行的固定函数逻辑。这就是我们在 PhysX 2.x 中所做的 - 不幸的是，我们提供的基于组的简单过滤规则(simple group based filtering rules)不够灵活，无法涵盖所有应用程序。在3.0中，我们引入了一个着色器系统(shader system)，它允许开发人员使用在矢量处理器上运行的代码实现任意规则系统(因此无法访问主内存中的任何最终游戏数据库(eventual game data base ))，这比2.x固定函数过滤更灵活，但同样高效，还有一个完全灵活的回调机制，其中过滤器着色器调用能够访问任何应用程序数据的CPU回调函数， 以性能为代价 -- 有关详细信息，请参阅 `PxSimulationFilterCallback`。最好的部分是，应用程序可以基于每对(per-pair)进行决策，以进行速度与灵活性的权衡。
 
@@ -264,6 +265,7 @@ setupFiltering(mCrabBody, FilterGroup::eCRAB, FilterGroup::eHEIGHTFIELD);
 聚合(Aggregates)是`actor`的集合。聚合不提供额外的`simulate`或查询功能，但允许您告诉 SDK 一组`actor`将聚类在一起，这反过来又允许 SDK 优化其空间数据操作。一个典型的用例是布娃娃，由多个不同的`actor`组成。如果没有聚集体，这会产生与布娃娃中的`Shape`一样多的粗检测实体(broad-phase entries)。通常，将布娃娃在粗检测阶段表示为单个实体，并在必要时在第二个pass中执行内部重叠测试(internal overlap tests)会更有效。另一个潜在的用例是具有大量附加`Shape`的单个`Actor`。
 
 ## Creating an Aggregate
+
 ----------
 从 `PxPhysics` 对象创建聚合：
 
